@@ -29,7 +29,7 @@ def get_rankings(site, contest_code):
     log.info(f'Initialised website: {site}')
     total_pages = int(load_all(r'jump', 'class')[-1].text)
     scraped_scoreboard = []
-    for page in range(total_pages):    
+    for page in range(1, total_pages):    
         names = load_all(name_class, 'class')
         scores = load_all(r"//td[@class='num']//div[not(@class) and (@title='' or not(@title))]", 'xpath')
         if contest_code[0:4] == "COOK":
@@ -49,7 +49,7 @@ def get_rankings(site, contest_code):
                 [float(y.text.split()[0]) for y in scores]))                
         if page == total_pages-1: # Reached Last Page
             break    
-        driver.get(site + f'&page={page+2}') # go to next page
+        driver.get(site + f'&page={page+1}') # go to next page
     return scraped_scoreboard
 
 def scrape(contest_codes):

@@ -28,6 +28,8 @@ def load(driver):
             return waiter.until(EC.presence_of_element_located((By.LINK_TEXT, token)))
         if options == 'class':
             return waiter.until(EC.presence_of_element_located((By.CLASS_NAME, token)))
+        if options == 'css':
+            return waiter.until(EC.presence_of_element_located((By.CSS_SELECTOR, token)))
     return _load
 
 def load_all(driver):
@@ -38,5 +40,7 @@ def load_all(driver):
         if options == 'xpath':
             return waiter.until(EC.presence_of_all_elements_located((By.XPATH, token)))
         if options == 'tag':
-            return waiter.until(EC.presence_of_all_elements_located((By.TAG_NAME, token)))        
+            return waiter.until(EC.presence_of_all_elements_located((By.TAG_NAME, token)))  
+        if options == 'css':
+            return waiter.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, token)))      
     return _load_all

@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timedelta
 import pickle
 import os.path
 from googleapiclient.discovery import build
@@ -9,7 +9,7 @@ import os
 sys.path.append( # Add absolute path of utils to sys.path
     os.path.join( os.path.dirname( os.path.realpath( __file__ )), 
     '../student-ratings' ))
-from scrapers import codechef, hackerearth
+from scrapers import codechef, hackerearth, google
 from database import db_tools as tools
 from ratings import processor
 from pathlib import Path
@@ -23,9 +23,10 @@ months = ['jan', 'feb', 'march', 'april', 'may', 'june', 'july', 'aug', 'sept', 
 
 # Objects of this class are made for each contest; This allows the association of name, website, etc to that particular contest
 class contest_details():
-    def __init__(self, url):
-        self.website = str(url[0].split('.')[1]) # Fetch the platform name
+    def __init__(self, url, event_name):
+        self.website = str(url[0].split('.')[0]) # Fetch the platform name
         self.contest_code = str(url[-1])
+        self.event_name = self.make_event_name(event_name.split())
         self.file_name = self.make_file_name()
 
     def make_file_name(self):
@@ -43,7 +44,19 @@ class contest_details():
                 return f'codechef-{month}-long-{self.contest_code[-2:]}.in'
         elif self.website == 'hackerearth':
             return f'hackerearth-{self.contest_code}.in'
+        elif self.website == 'g':
+            contest_round = self.event_name[1].lower()
+            year = self.event_name[-1][-2:]
+            return f'google-{self.contest_code}-{contest_round}-{year}'
     
+    def make_event_name(self, name_original):
+        if 'Qualification' in name_original:
+            return [self.contest_code, 'qualification', name_original[-1]]
+        elif 'Finals' in name_original:
+            return [self.contest_code, 'finals', name_original[-1]]
+        elif 'Round' in name_original:
+            return [self.contest_code, name_original[name_original.index('Round')+1], name_original[-1]]
+
     def set_leaderboard(self, leaderboard):
         self.leaderboard = leaderboard
 
@@ -78,7 +91,6 @@ def get_calendar_events(DAYS):
     calendar_response = response.get('items', [])
     return calendar_response
 
-
 def get_all_contests(DAYS):
     calendar_response = get_calendar_events(DAYS) # Gets all contest event in the last [DAYS] days
     contests = defaultdict(list)
@@ -91,7 +103,8 @@ def get_all_contests(DAYS):
     else:
         for event in calendar_response:
             try:
-                url = event['location'].replace('https://', '').split('/') # Remove the https and make the parts of the url a list
+                url = event['location'].replace('https://', '').replace('www.', '').split('/') # Remove the https and make the parts of the url a list
+
             except:
                 log.error('The contest {} does not have an associated website and is hence ignored.'.format(event['summary']))
                 continue
@@ -99,13 +112,13 @@ def get_all_contests(DAYS):
                 url.remove('') # To remove any unexpected blank items caused by a trailing slash
             except:
                 pass
-            
-            contest = contest_details(url) # Create a contest_details object for the contest
-            if contest.website not in ['codechef', 'hackerearth']: # Only codechef and hackerearth scrapers are compatible as of now
+            contest = contest_details(url, event['summary']) # Create a contest_details object for the contest
+            if contest.website not in ['codechef', 'hackerearth', 'g']: # Only google (future competitions), codechef, hackerearth scrapers are compatible as of now
                 continue
             if contest.file_name not in existing_contests: # Checks whether the contest has already been scraped, if not writes it to scraped contests
                 contest_names_file.write(contest.file_name+'\n')
                 contests[contest.website].append(contest)
+                log.info(f'Writing {contest.file_name} to list of scraped contests.')
             else:
                 log.warn(f'{contest.file_name} already exists, ignoring; To re-scrape, delete the file and remove this entry.')
  
@@ -128,6 +141,11 @@ def scrape(DAYS=30):
         assert len(leaderboards) == len(contests['hackerearth']) # Make sure the number of leaderboards is the same as number of contests
         for i in range(len(leaderboards)):
             contests['hackerearth'][i].set_leaderboard(leaderboards[i])
+        
+        leaderboards = google.scrape(list(contest.event_name for contest in contests['g']))
+        assert len(leaderboards) == len(contests['g']) # Make sure the number of leaderboards is the same as number of contests
+        for i in range(len(leaderboards)):
+            contests['g'][i].set_leaderboard(leaderboards[i])
     
     else:
         return
@@ -177,5 +195,5 @@ def execute(DAYS=30, map_USN=True, clean=False): #
 
 """ Uncomment one of the two lines depending on requirement, or call your desired function yourself """
 
-# execute(clean=True)
+execute(DAYS=60, clean=True)
 # make_scoreboard(map_USN=True, clean=True)

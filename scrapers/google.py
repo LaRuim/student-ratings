@@ -1,21 +1,12 @@
-from selenium import webdriver
-from time import sleep
-from csv import writer
+import sys
+import os
+from utils import selenium_utils, log
+from selenium.common.exceptions import ElementClickInterceptedException
+driver = selenium_utils.make_driver()  
+load_all = selenium_utils.load_all(driver)
+load = selenium_utils.load(driver)
 
-IS_OUTPUT_CSV = False
-scoreboard_url = "https://codingcompetitions.withgoogle.com/kickstart/round/0000000000051061"
-
-chromeOptions = webdriver.ChromeOptions()
-prefs = {'profile.managed_default_content_settings.images': 2,  # does not load images on web page
-         'disk-cache-size': 1024}  # use disk cache to reduce page load time
-
-chromeOptions.add_experimental_option("prefs", prefs)
-driver = webdriver.Chrome(options=chromeOptions)
-driver.get(scoreboard_url)
-
-
-
-'''
+"""
 <div class="ranking-table__row">
     <div class="ranking-table__row-cell ranking-table__row-cell--left ranking-table__row-cell__rank">1</div>
         <div class="ranking-table__row-cell ranking-table__row-cell--left ranking-table__row-cell__displayname">
@@ -34,74 +25,81 @@ Rank is stored directly in the <div> with className="ranking-table__row-cell__ra
 Score is stored directly in the <span> with className="user-total-score"
 UserName is stored in a <p> which is the child element of the <a> with className="ranking-table__row-cell__displayname"
 
-'''
+"""
 
+base_url = r'https://codingcompetitions.withgoogle.com'
+country_filter = r'?scoreboard_type=India'
+score_class = r'user-total-score'
+rank_class = r'ranking-table__row-cell__rank'
+name_class = r'ranking-table__row-cell__displayname'
+dropdown_xpath = r'//*[@id="scoreboard"]/div[2]/div/div[2]/div[2]/div/div'
+dropdown_vals_class = r'mdc-list-item'
+last_page_class = r'ranking-table-page-number-total-pages'
+next_button_xpath = r'//*[@id="scoreboard"]/div[2]/div/div[2]/div[3]/button[2]'
 
-score_class = "user-total-score"
-rank_class = "ranking-table__row-cell__rank"
-name_class = "ranking-table__row-cell__displayname"
-dropdown_class = "mdc-select__selected-text"
-dropdown_css = "ul.mdc-list>li.mdc-list-item"
-scraped_scoreboard = list()
+def get_contest_scoreboard(contest_name):
+    contest_type = contest_name[0]
+    contest_round = contest_name[1].upper()
+    year = contest_name[-1]
+    schedule_url = f'{base_url}/{contest_type}/archive/{year}'
+    log.info(f'Getting {schedule_url}')
+    driver.get(schedule_url)
+    rows = load_all(r'//div[@role="cell"]', 'xpath')
+    name = f'Round {contest_round} {year}'
+    log.info(f'Finding {name}')
+    for row in rows:
+        if row.text == name:
+            scoreboard_url = str(row.find_element_by_tag_name('a').get_attribute('href'))
+            return scoreboard_url
 
-# Wait for scoreboard to load
-while not driver.find_elements_by_class_name(score_class):
-    sleep(1)
+def scrape(contest_names):
+    final_scoreboard = list()
+    leaderboards = []
+    for contest_name in contest_names:
+        driver.get(get_contest_scoreboard(contest_name))
+        #driver.get(get_contest_scoreboard(contest_name) + country_filter)
+        #load_all(r'mdc-button__label', 'class')
+        #driver.refresh()
 
+        load(dropdown_xpath, 'xpath').click()
+        load_all(dropdown_vals_class, 'class')[-1].click()
 
-# Wait for scoreboard to reload after changing the number of rows to 50
-number_of_rows = len(driver.find_elements_by_class_name(score_class))
-total_pages = int(driver.find_element_by_class_name("ranking-table-page-number-total-pages").text.split()[1])
-if number_of_rows < 50:
-    pass    # Less than 30 people, do nothing
-elif number_of_rows == 50 and total_pages == 1:
-    pass    # Exactly 30 people, do nothing
-else:
-    # More than 30 people, Changing the scoreboard to 50 rows
-    driver.find_elements_by_class_name(dropdown_class)[-1].click()           # Click drop-down to change rows
-    sleep(0.5)
-    driver.find_elements_by_css_selector(dropdown_css)[-1].click()        # Click on last option in the drop-down
-    while number_of_rows == 50:
-        sleep(0.5)
-        number_of_rows = len(driver.find_elements_by_class_name(score_class))
+        # Find number of pages in the scoreboard
+        last_page = int(load(last_page_class, 'class').text.split()[-1])
+        last_score = "1"
 
-# Find number of pages in the scoreboard
-total_pages = int(driver.find_element_by_class_name("ranking-table-page-number-total-pages").text.split()[1])
-lowest_so_far="1"
-
-for page in range(total_pages):
-    try:
-        score_elements = driver.find_elements_by_class_name(score_class)
-        rank_elements = driver.find_elements_by_class_name(rank_class)
-        name_elements = driver.find_elements_by_class_name(name_class)
-        scraped_scoreboard.extend(list(zip(
-            [x.find_element_by_tag_name("p").text for x in name_elements],
-            [y.text for y in rank_elements],
-            [z.text for z in score_elements])))
-    except:
-        score_elements = driver.find_elements_by_class_name(score_class)
-        rank_elements = driver.find_elements_by_class_name(rank_class)[1:]
-        name_elements = driver.find_elements_by_class_name(name_class)
-        scraped_scoreboard.extend(list(zip(
-            [x.find_element_by_tag_name("p").text for x in name_elements],
-            [y.text for y in rank_elements],
-            [z.text for z in score_elements])))
-    if page == total_pages-1:  # Reached last_page
-        break
-    driver.find_elements_by_tag_name("button")[-1].click()  # click to go to next page
-    last_name = scraped_scoreboard[-1][0]
-    while driver.find_elements_by_class_name(name_class)[-1].find_element_by_tag_name("p").text == last_name:
-        sleep(0.1)  # Wait until next page has loaded
-
-driver.close()
-
-if IS_OUTPUT_CSV:
-    with open(f"{scoreboard_url.split('/')[-1]}.csv", "w") as fp:
-        csv_writer = writer(fp)
-        csv_writer.writerows(scraped_scoreboard)
-else:
-    for row in scraped_scoreboard:
-        if not row[1]==lowest_so_far:
-            print()
-            lowest_so_far=row[1]
-        print(row[0],end=" ") 
+        for page in range(0, last_page):
+            try:
+                score_elements = load_all(score_class, 'class')
+                rank_elements = load_all(rank_class, 'class')
+                name_elements = load_all(name_class, 'class')
+                final_scoreboard.extend(list(zip(
+                    [x.find_element_by_tag_name("p").text for x in name_elements],
+                    [y.text for y in rank_elements],
+                    [z.text for z in score_elements])))
+            except:
+                score_elements = load_all(score_class, 'class')
+                rank_elements = load_all(rank_class, 'class')[1:]
+                name_elements = load_all(name_class, 'class')
+                final_scoreboard.extend(list(zip(
+                    [x.find_element_by_tag_name("p").text for x in name_elements],
+                    [y.text for y in rank_elements],
+                    [z.text for z in score_elements])))
+            try:
+                load(next_button_xpath, 'xpath').click()
+            except ElementClickInterceptedException: # When unable to click next button
+                log.info(f'Last Page (page {last_page + 1}) reached')
+        shared_rank = []
+        rank_list = []
+        for user in final_scoreboard:
+            if user[1] == last_score:
+                shared_rank.append(user[0])
+                if final_scoreboard.index(user) == len(final_scoreboard) - 1:
+                    rank_list.append(' '.join(shared_rank))
+            else:
+                rank_list.append(' '.join(shared_rank))
+                shared_rank = []
+                last_score = user[1]
+                shared_rank.append(user[0])
+        leaderboards.append(rank_list)
+    return leaderboards
